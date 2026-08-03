@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@mission/*": ["./src/mission/*"],
+      "@policy/*": ["./src/policy/*"],
+      "@workflow/*": ["./src/workflow/*"],
+      "@brain/*": ["./src/brain/*"],
+      "@contracts/*": ["./src/contracts/*"],
+      "@learning/*": ["./src/learning/*"],
+      "@experience/*": ["./src/experience/*"],
+      "@runtime/*": ["./src/runtime/*"],
+      "@analytics/*": ["./src/analytics/*"],
+      "@presentation/*": ["./src/presentation/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

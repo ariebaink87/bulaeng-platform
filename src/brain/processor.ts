@@ -76,7 +76,7 @@ export class BrainProcessor {
 
       // Memanggil Gemini API dengan RAG Context + Auto-Retry
       const response = await this.executeWithRetry(client, {
-        model: 'gemini-2.5-flash',
+        model: 'gemini-2.0-flash',
         contents: prompt,
         config: {
           maxOutputTokens: 300,

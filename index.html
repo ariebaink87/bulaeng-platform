@@ -111,7 +111,8 @@
       font-size: 13px;
       color: #cbd5e1;
       min-height: 40px;
-      white-space: pre-wrap; /* Agar format baris paragraf AI rapi */
+      white-space: pre-wrap; /* Format paragraf AI rapi */
+      line-height: 1.5;
     }
   </style>
 </head>
@@ -148,7 +149,14 @@
       <!-- Module Brain AI integration -->
       <div class="ai-box">
         <div class="info-label">🧠 BULAENG Brain AI Assistant</div>
-        <input type="text" id="aiPrompt" class="ai-input" placeholder="Tanyakan saran instruksi kelas..." value="Bagaimana cara mencairkan suasana kelas?">
+        <input 
+          type="text" 
+          id="aiPrompt" 
+          class="ai-input" 
+          placeholder="Tanyakan saran instruksi kelas..." 
+          value="Bagaimana cara mencairkan suasana kelas?"
+          onkeydown="if(event.key === 'Enter') askBrain()"
+        >
         <button id="btnAsk" class="btn-ask" onclick="askBrain()">✨ Tanya AI Brain</button>
         <div id="aiResponse" class="ai-response">Jawaban AI akan muncul di sini...</div>
       </div>
@@ -203,7 +211,7 @@
       }
     }
 
-    // Fungsi Komunikasi ke API AI Brain
+    // Fungsi Komunikasi ke API AI Brain (Sesuai Struktur Response Server Baru)
     async function askBrain() {
       const promptInput = document.getElementById('aiPrompt').value.trim();
       const currentMoment = document.getElementById('moment').innerText;
@@ -228,8 +236,13 @@
         });
         
         const result = await res.json();
-        // Menangani fleksibilitas properti respon dari server
-        responseEl.innerText = result.response || result.result || "Tidak ada respon dari server.";
+
+        if (result.success) {
+          // Menangani fleksibilitas data.response atau top-level response
+          responseEl.innerText = result.data?.response || result.response || "Tidak ada respon dari server.";
+        } else {
+          responseEl.innerText = `❌ Error: ${result.error || 'Terjadi kesalahan.'}`;
+        }
       } catch (err) {
         console.error(err);
         responseEl.innerText = "❌ Gagal terhubung ke Brain API.";

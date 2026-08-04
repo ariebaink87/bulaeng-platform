@@ -92,24 +92,47 @@ app.post('/api/v1/advance', (req, res) => {
   res.json({ success: true, data: classState });
 });
 
-// 3. Endpoint Brain AI Ask
+// 3. Endpoint Brain AI Ask (RAG Enabled)
 app.post('/api/v1/brain/ask', async (req, res) => {
   try {
     const { prompt, currentMoment } = req.body;
+
+    // Validasi input prompt
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Field "prompt" wajib diisi dan berupa teks.'
+      });
+    }
+
+    // Gunakan moment dari request, atau fallback ke state kelas saat ini
     const momentContext = currentMoment || classState.current_moment;
-    
+
+    // Memproses prompt via RAG Knowledge Engine & Gemini API
     const responseText = await brain.processPedagogicalPrompt(prompt, momentContext);
-    res.json({ success: true, response: responseText });
+
+    return res.json({
+      success: true,
+      data: {
+        moment: momentContext,
+        prompt: prompt.trim(),
+        response: responseText
+      }
+    });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ [BRAIN API ERROR]:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Terjadi kesalahan internal pada Brain Processor.'
+    });
   }
 });
 
 // -------------------------------------------------------------
 // SERVER BINDING
 // -------------------------------------------------------------
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, () => {
   console.log(`🚀 BULAENG OS Server running at http://localhost:${PORT}`);
 });

@@ -20,8 +20,8 @@ export class BrainProcessor {
   private async executeWithRetry(
     client: GoogleGenAI,
     params: any,
-    retries = 2,
-    defaultDelayMs = 4000
+    retries = 1,
+    defaultDelayMs = 3000
   ): Promise<any> {
     let currentDelay = defaultDelayMs;
 
@@ -37,10 +37,9 @@ export class BrainProcessor {
           error?.message?.includes('429');
 
         if (isRateLimit && attempt < retries) {
-          // Coba ekstrak retryDelay asli dari error Google jika ada (misal: "38s" -> 38000ms)
           const retryMatch = errorStr.match(/"retryDelay"\s*:\s*"(\d+)s"/);
           if (retryMatch && retryMatch[1]) {
-            currentDelay = parseInt(retryMatch[1], 10) * 1000 + 1000; // Tambah buffer 1 detik
+            currentDelay = parseInt(retryMatch[1], 10) * 1000 + 1000;
           }
 
           console.warn(
@@ -48,7 +47,7 @@ export class BrainProcessor {
           );
 
           await new Promise((resolve) => setTimeout(resolve, currentDelay));
-          currentDelay *= 2; // Eksponensial jika tidak ada header dari Google
+          currentDelay *= 2;
         } else {
           throw error;
         }
@@ -67,26 +66,29 @@ export class BrainProcessor {
       const client = this.getClient();
 
       if (!client) {
-        return `[BRAIN OFFLINE MODE]: API Key belum dikonfigurasi. Prompt diterima: "${prompt}" pada momen "${currentMoment}".`;
+        return `🤖 [BRAIN OFFLINE MODE]: API Key belum dikonfigurasi. Respon simulasi untuk prompt: "${prompt}" pada momen "${currentMoment}".`;
       }
 
       // Memanggil Gemini API dengan fitur Auto-Retry
       const response = await this.executeWithRetry(client, {
-        model: 'gemini-2.0-flash-lite',
+        model: 'gemini-2.0-flash',
         contents: prompt,
         config: {
-          maxOutputTokens: 250, // Hemat token & mempercepat respon
+          maxOutputTokens: 250,
           systemInstruction: `Anda adalah AI Co-Teacher untuk platform BULAENG Classroom OS. 
 Saat ini kelas sedang berada pada momen: "${currentMoment}". 
 Berikan respon yang singkat, mendukung pedagogi aktif, dan relevan dengan momen tersebut.`,
         },
       });
 
-      // PERBAIKAN: Pemanggilan method response.text()
-      const responseText = typeof response.text === 'function' ? response.text() : response.text;
+      // Ekstraksi teks respon secara aman
+      const responseText = 
+        typeof response.text === 'function' ? response.text() : 
+        response.text || 
+        response.candidates?.[0]?.content?.parts?.[0]?.text;
 
       if (!responseText) {
-        return 'Tidak ada respon yang dihasilkan oleh AI Brain.';
+        return 'Tidak ada respon teks yang dihasilkan oleh AI Brain.';
       }
 
       return responseText;
@@ -94,16 +96,19 @@ Berikan respon yang singkat, mendukung pedagogi aktif, dan relevan dengan momen 
       console.error('❌ [BRAIN ERROR DETAIL]:', error?.message || error);
 
       const errorStr = JSON.stringify(error);
-      if (
+      const isRateLimit =
         error?.status === 429 ||
         errorStr.includes('429') ||
         errorStr.includes('RESOURCE_EXHAUSTED') ||
-        error?.message?.includes('429')
-      ) {
-        return '⚠️ Kuota gratis Gemini sedang sibuk. Silakan coba tekan tombol Tanya AI kembali dalam beberapa saat.';
+        error?.message?.includes('429');
+
+      // Jika kuota habis, kembalikan Fallback Mock Respon agar alur UI/Workflow TETAP BERJALAN
+      if (isRateLimit) {
+        console.warn('🔄 Switching to Mock Fallback due to API Quota Limit.');
+        return `🤖 [BULAENG Brain - Dev Mode]: (Momen: ${currentMoment}) Respon simulasi aktif karena kuota API habis. Instruksi "${prompt}" berhasil diproses oleh workflow!`;
       }
 
-      return 'Maaf, terjadi kesalahan saat memproses instruksi AI.';
+      return 'Maaf, terjadi kesalahan teknis pada sistem AI Brain.';
     }
   }
 }

@@ -37,6 +37,12 @@ const activeSessions = new Map<string, ClassroomRuntimeEngine>();
 // Middleware Utama
 app.use(express.json());
 
+// Middleware Global Logging (Mencatat semua HTTP Request yang masuk)
+app.use((req, res, next) => {
+  console.log(`🌐 [HTTP REQUEST] ${req.method} ${req.url}`);
+  next();
+});
+
 // -------------------------------------------------------------
 // SERVING STATIC FILES & INDEX.HTML
 // -------------------------------------------------------------
@@ -70,8 +76,12 @@ let currentMomentIndex = 0;
 // SOCKET.IO REALTIME EVENTS
 // -------------------------------------------------------------
 io.on('connection', (socket) => {
-  console.log('⚡ Client terhubung via Socket.io');
+  console.log(`⚡ [SOCKET.IO] Client terhubung ID: ${socket.id}`);
   socket.emit('state_changed', classState);
+
+  socket.on('disconnect', () => {
+    console.log(`❌ [SOCKET.IO] Client terputus ID: ${socket.id}`);
+  });
 });
 
 // -------------------------------------------------------------
@@ -80,6 +90,7 @@ io.on('connection', (socket) => {
 
 // 1. Endpoint Boot Engine (Sederhana)
 app.post('/api/v1/boot', (req, res) => {
+  console.log('🚀 [API REQ] /api/v1/boot - Memulai sesi kelas baru...');
   currentMomentIndex = 0;
   classState = {
     session_id: `SES-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -89,12 +100,15 @@ app.post('/api/v1/boot', (req, res) => {
   };
 
   io.emit('state_changed', classState);
+  console.log('✅ [API RES] Boot berhasil, State:', classState);
   res.json({ success: true, data: classState });
 });
 
 // 2. Endpoint Advance Moment (Sederhana)
 app.post('/api/v1/advance', (req, res) => {
+  console.log('⏩ [API REQ] /api/v1/advance - Memajukan moment...');
   if (classState.system_status !== 'RUNNING') {
+    console.warn('⚠️ [API WARN] /api/v1/advance - Gagal: Engine belum di-boot!');
     return res.status(400).json({ success: false, message: 'Engine belum di-boot!' });
   }
 
@@ -109,15 +123,18 @@ app.post('/api/v1/advance', (req, res) => {
   }
 
   io.emit('state_changed', classState);
+  console.log('✅ [API RES] Advance berhasil, Moment saat ini:', classState.current_moment);
   res.json({ success: true, data: classState });
 });
 
 // 3. Endpoint Brain AI Ask (RAG Enabled)
 app.post('/api/v1/brain/ask', async (req, res) => {
+  console.log('🧠 [API REQ] /api/v1/brain/ask - Memproses prompt AI...');
   try {
     const { prompt, currentMoment } = req.body;
 
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+      console.warn('⚠️ [API WARN] /api/v1/brain/ask - Prompt kosong.');
       return res.status(400).json({
         success: false,
         error: 'Field "prompt" wajib diisi dan berupa teks.'
@@ -125,7 +142,10 @@ app.post('/api/v1/brain/ask', async (req, res) => {
     }
 
     const momentContext = currentMoment || classState.current_moment;
+    console.log(`💬 Prompt Received: "${prompt.trim()}" | Context: ${momentContext}`);
+
     const responseText = await brain.processPedagogicalPrompt(prompt, momentContext);
+    console.log('✅ [API RES] Respon AI berhasil dibuat.');
 
     return res.json({
       success: true,
@@ -150,12 +170,14 @@ app.post('/api/v1/brain/ask', async (req, res) => {
 
 // 4. Brain Orchestrator Preparation Endpoint (03:00 AM)
 app.post('/api/brain/prepare-day', async (req, res) => {
+  console.log('🌅 [API REQ] /api/brain/prepare-day - Menjalankan alur persiapan...');
   try {
     const { group = 'B1' } = req.body;
 
     const orchestrator = new BrainOrchestrator();
     const episodePackage = await orchestrator.triggerEarlyMorningProcess(group);
 
+    console.log(`✅ [API RES] Persiapan hari selesai untuk grup: ${group}`);
     return res.status(200).json({
       success: true,
       message: `Episode for group ${group} successfully prepared by Brain Orchestrator.`,
@@ -172,10 +194,12 @@ app.post('/api/brain/prepare-day', async (req, res) => {
 
 // 5. Classroom Runtime Engine Endpoint (07:00 AM)
 app.post('/api/classroom/session', async (req, res) => {
+  console.log(`🏫 [API REQ] /api/classroom/session - Action: ${req.body?.action}`);
   try {
     const { action, sessionId, classId, teacherId } = req.body;
 
     if (!sessionId) {
+      console.warn('⚠️ [API WARN] sessionId tidak diberikan.');
       return res.status(400).json({ success: false, error: 'sessionId is required' });
     }
 
@@ -184,6 +208,7 @@ app.post('/api/classroom/session', async (req, res) => {
     // ACTION: BOOT
     if (action === 'BOOT') {
       if (!classId || !teacherId) {
+        console.warn('⚠️ [API WARN] classId atau teacherId kurang untuk BOOT.');
         return res.status(400).json({ success: false, error: 'classId and teacherId are required for BOOT' });
       }
 
@@ -191,10 +216,8 @@ app.post('/api/classroom/session', async (req, res) => {
       engine.boot();
       activeSessions.set(sessionId, engine);
 
-      // Reset index moment untuk sesi baru
       currentMomentIndex = 0;
 
-      // Sync state ke Socket.io UI
       classState = {
         session_id: sessionId,
         current_moment: MOMENTS[currentMomentIndex],
@@ -203,6 +226,7 @@ app.post('/api/classroom/session', async (req, res) => {
       };
       io.emit('state_changed', classState);
 
+      console.log(`✅ [RUNTIME BOOT] Sesi ${sessionId} aktif untuk kelas ${classId}`);
       return res.status(200).json({
         success: true,
         action: 'BOOT',
@@ -211,6 +235,7 @@ app.post('/api/classroom/session', async (req, res) => {
     }
 
     if (!engine) {
+      console.warn(`⚠️ [API WARN] Sesi ${sessionId} tidak aktif.`);
       return res.status(404).json({ success: false, error: `Session ${sessionId} is not active` });
     }
 
@@ -229,6 +254,7 @@ app.post('/api/classroom/session', async (req, res) => {
       }
       io.emit('state_changed', classState);
 
+      console.log(`✅ [RUNTIME ADVANCE] Sesi ${sessionId} maju ke moment berikutnya.`);
       return res.status(200).json({
         success: true,
         action: 'ADVANCE',
@@ -245,6 +271,7 @@ app.post('/api/classroom/session', async (req, res) => {
       classState.system_status = 'ENDED';
       io.emit('state_changed', classState);
 
+      console.log(`🛑 [RUNTIME SHUTDOWN] Sesi ${sessionId} ditutup.`);
       return res.status(200).json({
         success: true,
         action: 'SHUTDOWN',
@@ -267,7 +294,7 @@ app.post('/api/classroom/session', async (req, res) => {
 // -------------------------------------------------------------
 // SERVER BINDING
 // -------------------------------------------------------------
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
   console.log(`🚀 BULAENG OS Server running at http://localhost:${PORT}`);

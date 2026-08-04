@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { KnowledgeEngine } from '../knowledge';
 
 export class BrainProcessor {
   private ai: GoogleGenAI | null = null;
@@ -57,34 +58,42 @@ export class BrainProcessor {
 
   /**
    * Mengolah perintah atau pertanyaan pedagogis dari guru/siswa
+   * Dilengkapi dengan RAG Knowledge Engine berbasis momen kelas
    */
   public async processPedagogicalPrompt(
     prompt: string,
-    currentMoment: string
+    currentMoment: string = 'Pembukaan & Apersepsi'
   ): Promise<string> {
+    // Retrievable Context dari Knowledge Engine
+    const ragContext = KnowledgeEngine.getContextByMoment(currentMoment);
+
     try {
       const client = this.getClient();
 
       if (!client) {
-        return `🤖 [BRAIN OFFLINE MODE]: API Key belum dikonfigurasi. Respon simulasi untuk prompt: "${prompt}" pada momen "${currentMoment}".`;
+        return `🤖 [BRAIN OFFLINE MODE]\n${ragContext}\n\nRespon simulasi untuk prompt: "${prompt}" (API Key belum dikonfigurasi).`;
       }
 
-      // Memanggil Gemini API dengan fitur Auto-Retry
+      // Memanggil Gemini API dengan RAG Context + Auto-Retry
       const response = await this.executeWithRetry(client, {
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         contents: prompt,
         config: {
-          maxOutputTokens: 250,
-          systemInstruction: `Anda adalah AI Co-Teacher untuk platform BULAENG Classroom OS. 
-Saat ini kelas sedang berada pada momen: "${currentMoment}". 
-Berikan respon yang singkat, mendukung pedagogi aktif, dan relevan dengan momen tersebut.`,
+          maxOutputTokens: 300,
+          systemInstruction: `Anda adalah AI Co-Teacher untuk platform BULAENG Classroom OS.
+Saat ini kelas sedang berada pada momen: "${currentMoment}".
+
+Gunakan panduan pedagogis berikut sebagai acuan utama Anda:
+${ragContext}
+
+Berikan respon yang singkat, praktis, mendukung pedagogi aktif, dan langsung dapat diterapkan oleh guru di kelas.`,
         },
       });
 
       // Ekstraksi teks respon secara aman
-      const responseText = 
-        typeof response.text === 'function' ? response.text() : 
-        response.text || 
+      const responseText =
+        typeof response.text === 'function' ? response.text() :
+        response.text ||
         response.candidates?.[0]?.content?.parts?.[0]?.text;
 
       if (!responseText) {
@@ -102,10 +111,10 @@ Berikan respon yang singkat, mendukung pedagogi aktif, dan relevan dengan momen 
         errorStr.includes('RESOURCE_EXHAUSTED') ||
         error?.message?.includes('429');
 
-      // Jika kuota habis, kembalikan Fallback Mock Respon agar alur UI/Workflow TETAP BERJALAN
+      // Jika kuota habis, kembalikan Fallback Mock Respon berserta RAG Context agar alur UI/Workflow TETAP BERJALAN
       if (isRateLimit) {
         console.warn('🔄 Switching to Mock Fallback due to API Quota Limit.');
-        return `🤖 [BULAENG Brain - Dev Mode]: (Momen: ${currentMoment}) Respon simulasi aktif karena kuota API habis. Instruksi "${prompt}" berhasil diproses oleh workflow!`;
+        return `🤖 [BULAENG Brain - Dev Mode]\n${ragContext}\n\n(Quota Limit) Instruksi "${prompt}" berhasil diproses secara lokal!`;
       }
 
       return 'Maaf, terjadi kesalahan teknis pada sistem AI Brain.';

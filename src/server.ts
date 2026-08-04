@@ -1,5 +1,8 @@
-import 'dotenv/config';
-import express from 'express';
+import dotenv from 'dotenv';
+// Muat variabel lingkungan dari .env di baris paling pertama
+dotenv.config();
+
+import express, { Request, Response } from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -21,11 +24,13 @@ const io = new Server(server, {
   },
 });
 
-// Inisialisasi Engine Instansiasi Global untuk Sesi Aktif
+// ---------------------------------------------------------
+// INISIALISASI ENGINE & PRESENTER
+// ---------------------------------------------------------
 const os = new ClassroomRuntimeEngine('session-202', 'class-b2', 'teacher-888');
 const presenter = new ClassroomPresenter(os);
 
-// Load contoh Rencana Pembelajaran
+// Load Contoh Rencana Pembelajaran
 const initialPlan: ClassroomMoment[] = [
   {
     momentId: 'm-1',
@@ -46,61 +51,74 @@ const initialPlan: ClassroomMoment[] = [
 ];
 os.orchestrator.loadPlan(initialPlan);
 
+// Helper untuk Broadcast UI State via WebSocket
+const broadcastState = () => {
+  const uiState = presenter.getUIState();
+  const payload = PresentationAdapter.toApiResponse(uiState);
+  io.emit('state_changed', payload);
+  return payload;
+};
+
 // ---------------------------------------------------------
 // 1. REST API ENDPOINTS
 // ---------------------------------------------------------
 
 // GET: Cek Status / Payload UI State
-app.get('/api/v1/state', (req, res) => {
+app.get('/api/v1/state', (_req: Request, res: Response) => {
   const uiState = presenter.getUIState();
   const payload = PresentationAdapter.toApiResponse(uiState);
   res.json(payload);
 });
 
 // POST: Boot Engine
-app.post('/api/v1/boot', (req, res) => {
+app.post('/api/v1/boot', (_req: Request, res: Response) => {
   os.boot();
-  const uiState = presenter.getUIState();
-  const payload = PresentationAdapter.toApiResponse(uiState);
-  
-  io.emit('state_changed', payload);
+  const payload = broadcastState();
   res.json({ message: 'Engine booted successfully', payload });
 });
 
 // POST: Advance Moment (Lanjut Momen Berikutnya)
-app.post('/api/v1/advance', (req, res) => {
+app.post('/api/v1/advance', (_req: Request, res: Response) => {
   os.advanceMoment();
-  const uiState = presenter.getUIState();
-  const payload = PresentationAdapter.toApiResponse(uiState);
-
-  io.emit('state_changed', payload);
+  const payload = broadcastState();
   res.json({ message: 'Advanced to next moment', payload });
 });
 
 // POST: Tanya AI Brain (Fase 2 Integrasi LLM)
-// POST: Tanya AI Brain (Fase 2 Integrasi LLM)
-app.post('/api/v1/brain/ask', async (req, res) => {
+app.post('/api/v1/brain/ask', async (req: Request, res: Response): Promise<void> => {
   const { prompt } = req.body;
-  if (!prompt) {
-    return res.status(400).json({ error: 'Prompt tidak boleh kosong.' });
+  if (!prompt || typeof prompt !== 'string') {
+    res.status(400).json({ error: 'Prompt tidak boleh kosong dan harus berupa string.' });
+    return;
   }
 
-  // Mengambil state UI dan menggunakan fallback safe access
-  const uiState = presenter.getUIState() as any;
-  const currentMoment = uiState.current_moment || uiState.currentMoment || 'Umum';
+  // Safe property extraction (mendukung snake_case & camelCase)
+  const uiState = presenter.getUIState() as Record<string, any>;
+  const currentMoment = uiState.current_moment ?? uiState.currentMoment ?? 'Umum';
 
-  // Memanggil method brain dengan type bypass
-  const brain = os.brain as any;
-  const aiResponse = typeof brain.processPedagogicalPrompt === 'function'
-    ? await brain.processPedagogicalPrompt(prompt, currentMoment)
-    : `[BRAIN OFFLINE]: Method processor belum terhubung. Prompt: "${prompt}"`;
+  try {
+    const brain = os.brain as any;
+    let aiResponse: string;
 
-  res.json({
-    status: 'success',
-    prompt,
-    moment: currentMoment,
-    response: aiResponse,
-  });
+    if (brain && typeof brain.processPedagogicalPrompt === 'function') {
+      aiResponse = await brain.processPedagogicalPrompt(prompt, currentMoment);
+    } else {
+      aiResponse = `[BRAIN OFFLINE]: Method processor belum terhubung. Prompt: "${prompt}"`;
+    }
+
+    res.json({
+      status: 'success',
+      prompt,
+      moment: currentMoment,
+      response: aiResponse,
+    });
+  } catch (error) {
+    console.error('❌ Error processing AI prompt:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Gagal memproses prompt di AI Brain.',
+    });
+  }
 });
 
 // ---------------------------------------------------------
@@ -120,9 +138,10 @@ io.on('connection', (socket) => {
 // ---------------------------------------------------------
 // 3. START SERVER
 // ---------------------------------------------------------
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`\n🚀 [BULAENG OS SERVER] Running on http://localhost:${PORT}`);
+  console.log(`🔑 [API KEY STATUS] Loaded Key: ${process.env.GEMINI_API_KEY ? 'OK (Terdeteksi)' : 'KOSONG (Cek .env)'}`);
   console.log(`🌐 REST API State Endpoint : http://localhost:${PORT}/api/v1/state`);
   console.log(`⚡ WebSocket Gateway Active  : ws://localhost:${PORT}\n`);
 });

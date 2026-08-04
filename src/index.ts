@@ -1,52 +1,45 @@
-import { ClassroomRuntimeEngine } from './runtime/engine';
-import { ClassroomPresenter } from './experience/presenter';
-import { PresentationAdapter } from './presentation/adapter';
-import { ClassroomMoment } from './contracts/moment';
+import { BriefingEngine } from './brain';
+import { Classroom, Teacher } from './domain';
 
-async function runFullBulaengOS() {
-  console.log('🌟 [BULAENG CLASSROOM OS] Executing Full 10-Module Pipeline Test...\n');
+async function main() {
+  console.log('🚀 Memulai BULAENG Classroom OS...\n');
 
-  // 1. Booting Engine
-  const os = new ClassroomRuntimeEngine('session-202', 'class-b2', 'teacher-888');
-  const presenter = new ClassroomPresenter(os);
-  os.boot();
+  // 1. Inisialisasi data domain
+  const dummyTeacher: Teacher = {
+    id: 'tch-001',
+    name: 'Ibu Rosiana',
+    role: 'TEACHER',
+    email: 'rosiana@bulaeng.id',
+    assignedClassroomIds: ['cls-paud-a'],
+    createdAt: new Date(),
+  };
 
-  // 2. Workflow Plan & Advance
-  const plan: ClassroomMoment[] = [
-    {
-      momentId: 'm-10',
-      title: 'Orientasi Masalah',
-      type: 'PRESENTATION',
-      durationSeconds: 300,
-      payload: {},
-      isRequired: true,
-    },
-  ];
-  os.orchestrator.loadPlan(plan);
-  os.advanceMoment();
+  const dummyClassroom: Classroom = {
+    id: 'cls-paud-a',
+    name: 'PAUD Bintang Kecil (Kelas A)',
+    academicYear: '2026/2027',
+    leadTeacherId: 'tch-001',
+    studentIds: ['std-001', 'std-002'],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
 
-  // 3. Learning Module
-  os.learningTracker.recordAssessment({
-    studentId: 'std-01',
-    competencyId: 'CRITICAL_THINKING',
-    score: 90,
-    feedback: 'Pemahaman masalah sangat tajam.',
+  // 2. Jalankan AI Engine (Brain)
+  const engine = new BriefingEngine();
+  const result = await engine.generateDailyBriefing({
+    teacher: dummyTeacher,
+    classroom: dummyClassroom,
+    date: new Date().toISOString(),
   });
 
-  // 4. Mission / Gamification Module
-  const earnedXp = os.missionEngine.completeQuest('q-orientasi');
-  console.log(`🎮 [MISSION REWARD] Quest Selesai! Student mendapat +${earnedXp} XP`);
-  console.log('🏆 [GAMIFICATION STATUS]:', JSON.stringify(os.missionEngine.getMissionStatus(), null, 2));
-
-  // 5. Presentation Payload Output
-  const uiState = presenter.getUIState();
-  const apiPayload = PresentationAdapter.toApiResponse(uiState);
-  console.log('\n🌐 [PRESENTATION API PAYLOAD]:');
-  console.log(JSON.stringify(apiPayload, null, 2));
-
-  // 6. System Shutdown
-  os.shutdown();
-  console.log('\n✅ ALL 10 MODULES INTEGRATED AND OPERATIONAL!');
+  // 3. Tampilkan hasil
+  console.log('--- Daily Briefing Result ---');
+  console.log(`Ringkasan   : ${result.summary}`);
+  console.log(`Fokus CP    : ${result.focusElements.join(', ')}`);
+  console.log('Rekomendasi Aktivitas:');
+  result.recommendedActivities.forEach((act, idx) => {
+    console.log(`  ${idx + 1}. ${act}`);
+  });
 }
 
-runFullBulaengOS();
+main().catch(console.error);

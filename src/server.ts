@@ -3,24 +3,46 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import path from 'path';
+import cors from 'cors';
 import { BrainProcessor } from './brain/processor';
+import { BrainOrchestrator } from './brain/orchestrator/brain.orchestrator';
+import { ClassroomRuntimeEngine } from './runtime/engine';
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+// -------------------------------------------------------------
+// CORS & SOCKET.IO CONFIGURATION (Frontend Vercel / Local)
+// -------------------------------------------------------------
+const allowedOrigins = '*'; // Mengizinkan semua origin untuk fleksibilitas Dev/Vercel
+
+app.use(cors({
+  origin: allowedOrigins,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST']
+  }
+});
 
 const brain = new BrainProcessor();
 
+// Store In-Memory untuk Sesi Runtime Engine
+const activeSessions = new Map<string, ClassroomRuntimeEngine>();
+
+// Middleware Utama
 app.use(express.json());
 
 // -------------------------------------------------------------
 // SERVING STATIC FILES & INDEX.HTML
 // -------------------------------------------------------------
-// Menangani pengiriman file statis dari root folder proyek
 app.use(express.static(path.join(__dirname, '../')));
 app.use(express.static(process.cwd()));
 
-// Route explicit untuk memastikan file index.html langsung dimuat saat membuka http://localhost:3000
 app.get('/', (req, res) => {
   res.sendFile(path.join(process.cwd(), 'index.html'));
 });
@@ -28,7 +50,6 @@ app.get('/', (req, res) => {
 // -------------------------------------------------------------
 // STATE MANAGEMENT & MOMENTS
 // -------------------------------------------------------------
-// State Sesi Kelas Sederhana di Memori
 let classState = {
   session_id: 'SESSION-OFFLINE',
   current_moment: 'Belum Dimulai',
@@ -36,7 +57,6 @@ let classState = {
   system_status: 'DISCONNECTED'
 };
 
-// Daftar Momen Pembelajaran BULAENG OS
 const MOMENTS = [
   'Pembukaan & Apersepsi',
   'Eksplorasi Konsep',
@@ -55,10 +75,10 @@ io.on('connection', (socket) => {
 });
 
 // -------------------------------------------------------------
-// API ENDPOINTS
+// API ENDPOINTS (Legacy & Realtime Socket Sync)
 // -------------------------------------------------------------
 
-// 1. Endpoint Boot Engine
+// 1. Endpoint Boot Engine (Sederhana)
 app.post('/api/v1/boot', (req, res) => {
   currentMomentIndex = 0;
   classState = {
@@ -72,7 +92,7 @@ app.post('/api/v1/boot', (req, res) => {
   res.json({ success: true, data: classState });
 });
 
-// 2. Endpoint Advance Moment
+// 2. Endpoint Advance Moment (Sederhana)
 app.post('/api/v1/advance', (req, res) => {
   if (classState.system_status !== 'RUNNING') {
     return res.status(400).json({ success: false, message: 'Engine belum di-boot!' });
@@ -97,7 +117,6 @@ app.post('/api/v1/brain/ask', async (req, res) => {
   try {
     const { prompt, currentMoment } = req.body;
 
-    // Validasi input prompt
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return res.status(400).json({
         success: false,
@@ -105,10 +124,7 @@ app.post('/api/v1/brain/ask', async (req, res) => {
       });
     }
 
-    // Gunakan moment dari request, atau fallback ke state kelas saat ini
     const momentContext = currentMoment || classState.current_moment;
-
-    // Memproses prompt via RAG Knowledge Engine & Gemini API
     const responseText = await brain.processPedagogicalPrompt(prompt, momentContext);
 
     return res.json({
@@ -124,6 +140,126 @@ app.post('/api/v1/brain/ask', async (req, res) => {
     return res.status(500).json({
       success: false,
       error: error.message || 'Terjadi kesalahan internal pada Brain Processor.'
+    });
+  }
+});
+
+// -------------------------------------------------------------
+// CORE BULAENG OS ARCHITECTURE ENDPOINTS (03:00 AM & 07:00 AM)
+// -------------------------------------------------------------
+
+// 4. Brain Orchestrator Preparation Endpoint (03:00 AM)
+app.post('/api/brain/prepare-day', async (req, res) => {
+  try {
+    const { group = 'B1' } = req.body;
+
+    const orchestrator = new BrainOrchestrator();
+    const episodePackage = await orchestrator.triggerEarlyMorningProcess(group);
+
+    return res.status(200).json({
+      success: true,
+      message: `Episode for group ${group} successfully prepared by Brain Orchestrator.`,
+      data: episodePackage,
+    });
+  } catch (error: any) {
+    console.error('❌ [ORCHESTRATOR ERROR]:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to trigger prepare day workflow.',
+    });
+  }
+});
+
+// 5. Classroom Runtime Engine Endpoint (07:00 AM)
+app.post('/api/classroom/session', async (req, res) => {
+  try {
+    const { action, sessionId, classId, teacherId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ success: false, error: 'sessionId is required' });
+    }
+
+    let engine = activeSessions.get(sessionId);
+
+    // ACTION: BOOT
+    if (action === 'BOOT') {
+      if (!classId || !teacherId) {
+        return res.status(400).json({ success: false, error: 'classId and teacherId are required for BOOT' });
+      }
+
+      engine = new ClassroomRuntimeEngine(sessionId, classId, teacherId);
+      engine.boot();
+      activeSessions.set(sessionId, engine);
+
+      // Reset index moment untuk sesi baru
+      currentMomentIndex = 0;
+
+      // Sync state ke Socket.io UI
+      classState = {
+        session_id: sessionId,
+        current_moment: MOMENTS[currentMomentIndex],
+        progress: 20,
+        system_status: 'RUNNING'
+      };
+      io.emit('state_changed', classState);
+
+      return res.status(200).json({
+        success: true,
+        action: 'BOOT',
+        message: `Session ${sessionId} booted successfully for class ${classId}`,
+      });
+    }
+
+    if (!engine) {
+      return res.status(404).json({ success: false, error: `Session ${sessionId} is not active` });
+    }
+
+    // ACTION: ADVANCE
+    if (action === 'ADVANCE') {
+      engine.advanceMoment();
+
+      if (currentMomentIndex < MOMENTS.length - 1) {
+        currentMomentIndex++;
+        classState.current_moment = MOMENTS[currentMomentIndex];
+        classState.progress = Math.min(100, (currentMomentIndex + 1) * 20);
+      } else {
+        classState.current_moment = 'Kelas Selesai 🎯';
+        classState.progress = 100;
+        classState.system_status = 'ENDED';
+      }
+      io.emit('state_changed', classState);
+
+      return res.status(200).json({
+        success: true,
+        action: 'ADVANCE',
+        message: `Session ${sessionId} advanced to next moment`,
+      });
+    }
+
+    // ACTION: SHUTDOWN
+    if (action === 'SHUTDOWN') {
+      const metrics = engine.getMetrics();
+      engine.shutdown();
+      activeSessions.delete(sessionId);
+
+      classState.system_status = 'ENDED';
+      io.emit('state_changed', classState);
+
+      return res.status(200).json({
+        success: true,
+        action: 'SHUTDOWN',
+        metrics,
+        message: `Session ${sessionId} closed successfully`,
+      });
+    }
+
+    return res.status(400).json({ success: false, error: 'Invalid action provided' });
+
+  } catch (error: any) {
+    console.error('❌ [RUNTIME ERROR]:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Runtime execution error',
     });
   }
 });

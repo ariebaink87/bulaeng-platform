@@ -71,6 +71,10 @@
       cursor: pointer;
       transition: all 0.2s ease;
     }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
     .btn-boot { background: #2563eb; color: white; }
     .btn-boot:hover { background: #1d4ed8; }
     .btn-advance { background: #0d9488; color: white; }
@@ -107,6 +111,7 @@
       font-size: 13px;
       color: #cbd5e1;
       min-height: 40px;
+      white-space: pre-wrap; /* Agar format baris paragraf AI rapi */
     }
   </style>
 </head>
@@ -144,58 +149,94 @@
       <div class="ai-box">
         <div class="info-label">🧠 BULAENG Brain AI Assistant</div>
         <input type="text" id="aiPrompt" class="ai-input" placeholder="Tanyakan saran instruksi kelas..." value="Bagaimana cara mencairkan suasana kelas?">
-        <button class="btn-ask" onclick="askBrain()">✨ Tanya AI Brain</button>
+        <button id="btnAsk" class="btn-ask" onclick="askBrain()">✨ Tanya AI Brain</button>
         <div id="aiResponse" class="ai-response">Jawaban AI akan muncul di sini...</div>
       </div>
     </div>
   </div>
 
   <script>
-    const socket = io('http://localhost:3000');
+    // Koneksi Socket.io ke server lokal
+    const socket = io();
 
     socket.on('connect', () => {
       console.log('⚡ Terhubung ke Mesin BULAENG OS!');
+      const statusEl = document.getElementById('status');
+      if (statusEl.innerText === 'OFFLINE') {
+        statusEl.innerText = 'ONLINE';
+        statusEl.className = 'badge status-RUNNING';
+      }
+    });
+
+    socket.on('disconnect', () => {
+      const statusEl = document.getElementById('status');
+      statusEl.innerText = 'OFFLINE';
+      statusEl.className = 'badge status-DISCONNECTED';
     });
 
     socket.on('state_changed', (res) => {
-      const data = res.data;
-      document.getElementById('session').innerText = data.session_id;
-      document.getElementById('moment').innerText = data.current_moment;
-      document.getElementById('progress').innerText = data.progress;
+      const data = res.data || res;
+      if (data.session_id) document.getElementById('session').innerText = data.session_id;
+      if (data.current_moment) document.getElementById('moment').innerText = data.current_moment;
+      if (data.progress !== undefined) document.getElementById('progress').innerText = data.progress + '%';
       
-      const statusEl = document.getElementById('status');
-      statusEl.innerText = data.system_status;
-      statusEl.className = `badge status-${data.system_status}`;
+      if (data.system_status) {
+        const statusEl = document.getElementById('status');
+        statusEl.innerText = data.system_status;
+        statusEl.className = `badge status-${data.system_status}`;
+      }
     });
 
     async function bootEngine() {
-      await fetch('http://localhost:3000/api/v1/boot', { method: 'POST' });
+      try {
+        await fetch('/api/v1/boot', { method: 'POST' });
+      } catch (err) {
+        console.error('Gagal boot engine:', err);
+      }
     }
 
     async function advanceMoment() {
-      await fetch('http://localhost:3000/api/v1/advance', { method: 'POST' });
+      try {
+        await fetch('/api/v1/advance', { method: 'POST' });
+      } catch (err) {
+        console.error('Gagal advance moment:', err);
+      }
     }
 
     // Fungsi Komunikasi ke API AI Brain
     async function askBrain() {
-      const promptInput = document.getElementById('aiPrompt').value;
+      const promptInput = document.getElementById('aiPrompt').value.trim();
+      const currentMoment = document.getElementById('moment').innerText;
       const responseEl = document.getElementById('aiResponse');
+      const btnAsk = document.getElementById('btnAsk');
       
       if (!promptInput) return;
 
-      responseEl.innerText = "⏳ Sedang berpikir...";
+      // Status loading & mematikan tombol sementara
+      btnAsk.disabled = true;
+      btnAsk.innerText = "⏳ Sedang berpikir...";
+      responseEl.innerText = "⏳ Sedang menghubungi BULAENG Brain AI...";
 
       try {
-        const res = await fetch('http://localhost:3000/api/v1/brain/ask', {
+        const res = await fetch('/api/v1/brain/ask', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: promptInput })
+          body: JSON.stringify({ 
+            prompt: promptInput,
+            currentMoment: currentMoment 
+          })
         });
         
         const result = await res.json();
-        responseEl.innerText = result.response || "Tidak ada respon.";
+        // Menangani fleksibilitas properti respon dari server
+        responseEl.innerText = result.response || result.result || "Tidak ada respon dari server.";
       } catch (err) {
+        console.error(err);
         responseEl.innerText = "❌ Gagal terhubung ke Brain API.";
+      } finally {
+        // Kembalikan tombol ke keadaan semula
+        btnAsk.disabled = false;
+        btnAsk.innerText = "✨ Tanya AI Brain";
       }
     }
   </script>

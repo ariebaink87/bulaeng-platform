@@ -1,147 +1,115 @@
-import dotenv from 'dotenv';
-// Muat variabel lingkungan dari .env di baris paling pertama
-dotenv.config();
-
-import express, { Request, Response } from 'express';
+import 'dotenv/config';
+import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
-import cors from 'cors';
-
-import { ClassroomRuntimeEngine } from './runtime/engine';
-import { ClassroomPresenter } from './experience/presenter';
-import { PresentationAdapter } from './presentation/adapter';
-import { ClassroomMoment } from './contracts/moment';
+import path from 'path';
+import { BrainProcessor } from './brain/processor';
 
 const app = express();
-app.use(cors());
+const server = http.createServer(app);
+const io = new Server(server);
+
+const brain = new BrainProcessor();
+
 app.use(express.json());
 
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST'],
-  },
+// -------------------------------------------------------------
+// SERVING STATIC FILES & INDEX.HTML
+// -------------------------------------------------------------
+// Menangani pengiriman file statis dari root folder proyek
+app.use(express.static(path.join(__dirname, '../')));
+app.use(express.static(process.cwd()));
+
+// Route explicit untuk memastikan file index.html langsung dimuat saat membuka http://localhost:3000
+app.get('/', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'index.html'));
 });
 
-// ---------------------------------------------------------
-// INISIALISASI ENGINE & PRESENTER
-// ---------------------------------------------------------
-const os = new ClassroomRuntimeEngine('session-202', 'class-b2', 'teacher-888');
-const presenter = new ClassroomPresenter(os);
-
-// Load Contoh Rencana Pembelajaran
-const initialPlan: ClassroomMoment[] = [
-  {
-    momentId: 'm-1',
-    title: 'Orientasi Masalah & Diskusi Awal',
-    type: 'PRESENTATION',
-    durationSeconds: 300,
-    payload: {},
-    isRequired: true,
-  },
-  {
-    momentId: 'm-2',
-    title: 'Pengerjaan Tugas Kelompok',
-    type: 'QUIZ',
-    durationSeconds: 600,
-    payload: {},
-    isRequired: true,
-  },
-];
-os.orchestrator.loadPlan(initialPlan);
-
-// Helper untuk Broadcast UI State via WebSocket
-const broadcastState = () => {
-  const uiState = presenter.getUIState();
-  const payload = PresentationAdapter.toApiResponse(uiState);
-  io.emit('state_changed', payload);
-  return payload;
+// -------------------------------------------------------------
+// STATE MANAGEMENT & MOMENTS
+// -------------------------------------------------------------
+// State Sesi Kelas Sederhana di Memori
+let classState = {
+  session_id: 'SESSION-OFFLINE',
+  current_moment: 'Belum Dimulai',
+  progress: 0,
+  system_status: 'DISCONNECTED'
 };
 
-// ---------------------------------------------------------
-// 1. REST API ENDPOINTS
-// ---------------------------------------------------------
+// Daftar Momen Pembelajaran BULAENG OS
+const MOMENTS = [
+  'Pembukaan & Apersepsi',
+  'Eksplorasi Konsep',
+  'Diskusi & Kolaborasi Kelompok',
+  'Presentasi & Unjuk Kerja',
+  'Refleksi & Evaluasi'
+];
+let currentMomentIndex = 0;
 
-// GET: Cek Status / Payload UI State
-app.get('/api/v1/state', (_req: Request, res: Response) => {
-  const uiState = presenter.getUIState();
-  const payload = PresentationAdapter.toApiResponse(uiState);
-  res.json(payload);
-});
-
-// POST: Boot Engine
-app.post('/api/v1/boot', (_req: Request, res: Response) => {
-  os.boot();
-  const payload = broadcastState();
-  res.json({ message: 'Engine booted successfully', payload });
-});
-
-// POST: Advance Moment (Lanjut Momen Berikutnya)
-app.post('/api/v1/advance', (_req: Request, res: Response) => {
-  os.advanceMoment();
-  const payload = broadcastState();
-  res.json({ message: 'Advanced to next moment', payload });
-});
-
-// POST: Tanya AI Brain (Fase 2 Integrasi LLM)
-app.post('/api/v1/brain/ask', async (req: Request, res: Response): Promise<void> => {
-  const { prompt } = req.body;
-  if (!prompt || typeof prompt !== 'string') {
-    res.status(400).json({ error: 'Prompt tidak boleh kosong dan harus berupa string.' });
-    return;
-  }
-
-  // Safe property extraction (mendukung snake_case & camelCase)
-  const uiState = presenter.getUIState() as Record<string, any>;
-  const currentMoment = uiState.current_moment ?? uiState.currentMoment ?? 'Umum';
-
-  try {
-    const brain = os.brain as any;
-    let aiResponse: string;
-
-    if (brain && typeof brain.processPedagogicalPrompt === 'function') {
-      aiResponse = await brain.processPedagogicalPrompt(prompt, currentMoment);
-    } else {
-      aiResponse = `[BRAIN OFFLINE]: Method processor belum terhubung. Prompt: "${prompt}"`;
-    }
-
-    res.json({
-      status: 'success',
-      prompt,
-      moment: currentMoment,
-      response: aiResponse,
-    });
-  } catch (error) {
-    console.error('❌ Error processing AI prompt:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Gagal memproses prompt di AI Brain.',
-    });
-  }
-});
-
-// ---------------------------------------------------------
-// 2. WEBSOCKET GATEWAY
-// ---------------------------------------------------------
+// -------------------------------------------------------------
+// SOCKET.IO REALTIME EVENTS
+// -------------------------------------------------------------
 io.on('connection', (socket) => {
-  console.log(`⚡ [WEBSOCKET] Client Connected: ${socket.id}`);
-
-  const uiState = presenter.getUIState();
-  socket.emit('state_changed', PresentationAdapter.toApiResponse(uiState));
-
-  socket.on('disconnect', () => {
-    console.log(`❌ [WEBSOCKET] Client Disconnected: ${socket.id}`);
-  });
+  console.log('⚡ Client terhubung via Socket.io');
+  socket.emit('state_changed', classState);
 });
 
-// ---------------------------------------------------------
-// 3. START SERVER
-// ---------------------------------------------------------
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`\n🚀 [BULAENG OS SERVER] Running on http://localhost:${PORT}`);
-  console.log(`🔑 [API KEY STATUS] Loaded Key: ${process.env.GEMINI_API_KEY ? 'OK (Terdeteksi)' : 'KOSONG (Cek .env)'}`);
-  console.log(`🌐 REST API State Endpoint : http://localhost:${PORT}/api/v1/state`);
-  console.log(`⚡ WebSocket Gateway Active  : ws://localhost:${PORT}\n`);
+// -------------------------------------------------------------
+// API ENDPOINTS
+// -------------------------------------------------------------
+
+// 1. Endpoint Boot Engine
+app.post('/api/v1/boot', (req, res) => {
+  currentMomentIndex = 0;
+  classState = {
+    session_id: `SES-${Math.floor(1000 + Math.random() * 9000)}`,
+    current_moment: MOMENTS[currentMomentIndex],
+    progress: 20,
+    system_status: 'RUNNING'
+  };
+
+  io.emit('state_changed', classState);
+  res.json({ success: true, data: classState });
+});
+
+// 2. Endpoint Advance Moment
+app.post('/api/v1/advance', (req, res) => {
+  if (classState.system_status !== 'RUNNING') {
+    return res.status(400).json({ success: false, message: 'Engine belum di-boot!' });
+  }
+
+  if (currentMomentIndex < MOMENTS.length - 1) {
+    currentMomentIndex++;
+    classState.current_moment = MOMENTS[currentMomentIndex];
+    classState.progress = Math.min(100, (currentMomentIndex + 1) * 20);
+  } else {
+    classState.current_moment = 'Kelas Selesai 🎯';
+    classState.progress = 100;
+    classState.system_status = 'ENDED';
+  }
+
+  io.emit('state_changed', classState);
+  res.json({ success: true, data: classState });
+});
+
+// 3. Endpoint Brain AI Ask
+app.post('/api/v1/brain/ask', async (req, res) => {
+  try {
+    const { prompt, currentMoment } = req.body;
+    const momentContext = currentMoment || classState.current_moment;
+    
+    const responseText = await brain.processPedagogicalPrompt(prompt, momentContext);
+    res.json({ success: true, response: responseText });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// -------------------------------------------------------------
+// SERVER BINDING
+// -------------------------------------------------------------
+const PORT = 3000;
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 BULAENG OS Server running at http://localhost:${PORT}`);
 });

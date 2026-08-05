@@ -14,15 +14,31 @@ const server = http.createServer(app);
 // -------------------------------------------------------------
 // CORS & SOCKET.IO CONFIGURATION (Vercel Serverless Ready)
 // -------------------------------------------------------------
+const allowedOrigins = [
+  'https://bulaeng-app-flqk.vercel.app',
+  'https://bulaeng-platform-omega.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5000'
+];
+
+const checkCorsOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+  if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+    callback(null, true);
+  } else {
+    callback(null, true); // Fallback allow untuk testing
+  }
+};
+
 app.use(cors({
-  origin: '*',
+  origin: checkCorsOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
 
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: checkCorsOrigin,
     methods: ['GET', 'POST'],
     credentials: true
   },

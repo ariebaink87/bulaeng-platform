@@ -22,5 +22,5 @@
       "@presentation/*": ["./src/presentation/*"]
     }
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "api/**/*"]
 }

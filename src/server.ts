@@ -42,8 +42,14 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
     credentials: true
   },
-  transports: ['polling', 'websocket'], // WAJIB untuk Vercel
-  path: '/socket.io/'
+  transports: ['polling', 'websocket'], // Polling sebagai fallback utama di Vercel
+  path: '/socket.io/',
+  
+  // 💡 OPTIMASI UNTUK VERCEL SERVERLESS (Mencegah Putus-Nyambung)
+  pingTimeout: 60000,     // Menunggu hingga 60 detik sebelum menganggap client terputus
+  pingInterval: 25000,    // Mengirim ping heartbeat setiap 25 detik
+  connectTimeout: 45000,  // Waktu toleransi koneksi awal
+  allowEIO3: true
 });
 
 const brain = new BrainProcessor();

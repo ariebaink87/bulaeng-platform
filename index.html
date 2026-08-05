@@ -164,7 +164,7 @@
   </div>
 
   <script>
-    // Koneksi Socket.io ke server lokal
+    // Koneksi Socket.io ke server
     const socket = io();
 
     socket.on('connect', () => {
@@ -211,7 +211,7 @@
       }
     }
 
-    // Fungsi Komunikasi ke API AI Brain (Sesuai Struktur Response Server Baru)
+    // Fungsi Komunikasi ke API AI Brain
     async function askBrain() {
       const promptInput = document.getElementById('aiPrompt').value.trim();
       const currentMoment = document.getElementById('moment').innerText;
@@ -230,7 +230,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
-            prompt: promptInput,
+            prompt: promptInput, // Key disesuaikan dengan validasi backend ('prompt')
             currentMoment: currentMoment 
           })
         });
@@ -238,8 +238,9 @@
         const result = await res.json();
 
         if (result.success) {
-          // Menangani fleksibilitas data.response atau top-level response
-          responseEl.innerText = result.data?.response || result.response || "Tidak ada respon dari server.";
+          // Menangani fleksibilitas struktur respons backend
+          const brainText = result.data?.prompt || result.data?.response || result.response;
+          responseEl.innerText = typeof brainText === 'object' ? JSON.stringify(brainText, null, 2) : (brainText || "Tidak ada respon dari server.");
         } else {
           responseEl.innerText = `❌ Error: ${result.error || 'Terjadi kesalahan.'}`;
         }

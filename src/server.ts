@@ -292,10 +292,14 @@ app.post('/api/classroom/session', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// SERVER BINDING
+// SERVER BINDING & EXPORT FOR VERCEL
 // -------------------------------------------------------------
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
-  console.log(`🚀 BULAENG OS Server running at http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`🚀 BULAENG OS Server running at http://localhost:${PORT}`);
+  });
+}
+
+export default app;

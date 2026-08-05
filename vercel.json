@@ -1,15 +1,9 @@
 {
   "version": 2,
-  "functions": {
-    "src/index.ts": {
-      "memory": 1024,
-      "maxDuration": 10
-    }
-  },
-  "routes": [
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "src/index.ts"
+      "source": "/(.*)",
+      "destination": "/api"
     }
   ]
 }

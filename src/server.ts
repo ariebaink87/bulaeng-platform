@@ -12,21 +12,22 @@ const app = express();
 const server = http.createServer(app);
 
 // -------------------------------------------------------------
-// CORS & SOCKET.IO CONFIGURATION (Frontend Vercel / Local)
+// CORS & SOCKET.IO CONFIGURATION (Vercel Serverless Ready)
 // -------------------------------------------------------------
-const allowedOrigins = '*'; // Mengizinkan semua origin untuk fleksibilitas Dev/Vercel
-
 app.use(cors({
-  origin: allowedOrigins,
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    methods: ['GET', 'POST']
-  }
+    origin: '*',
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  transports: ['polling', 'websocket'], // WAJIB untuk Vercel
+  path: '/socket.io/'
 });
 
 const brain = new BrainProcessor();
@@ -37,7 +38,7 @@ const activeSessions = new Map<string, ClassroomRuntimeEngine>();
 // Middleware Utama
 app.use(express.json());
 
-// Middleware Global Logging (Mencatat semua HTTP Request yang masuk)
+// Middleware Global Logging
 app.use((req, res, next) => {
   console.log(`🌐 [HTTP REQUEST] ${req.method} ${req.url}`);
   next();
@@ -85,10 +86,10 @@ io.on('connection', (socket) => {
 });
 
 // -------------------------------------------------------------
-// API ENDPOINTS (Legacy & Realtime Socket Sync)
+// API ENDPOINTS
 // -------------------------------------------------------------
 
-// 1. Endpoint Boot Engine (Sederhana)
+// 1. Endpoint Boot Engine
 app.post('/api/v1/boot', (req, res) => {
   console.log('🚀 [API REQ] /api/v1/boot - Memulai sesi kelas baru...');
   currentMomentIndex = 0;
@@ -104,7 +105,7 @@ app.post('/api/v1/boot', (req, res) => {
   res.json({ success: true, data: classState });
 });
 
-// 2. Endpoint Advance Moment (Sederhana)
+// 2. Endpoint Advance Moment
 app.post('/api/v1/advance', (req, res) => {
   console.log('⏩ [API REQ] /api/v1/advance - Memajukan moment...');
   if (classState.system_status !== 'RUNNING') {
@@ -164,11 +165,7 @@ app.post('/api/v1/brain/ask', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// CORE BULAENG OS ARCHITECTURE ENDPOINTS (03:00 AM & 07:00 AM)
-// -------------------------------------------------------------
-
-// 4. Brain Orchestrator Preparation Endpoint (03:00 AM)
+// 4. Brain Orchestrator Preparation Endpoint
 app.post('/api/brain/prepare-day', async (req, res) => {
   console.log('🌅 [API REQ] /api/brain/prepare-day - Menjalankan alur persiapan...');
   try {
@@ -192,7 +189,7 @@ app.post('/api/brain/prepare-day', async (req, res) => {
   }
 });
 
-// 5. Classroom Runtime Engine Endpoint (07:00 AM)
+// 5. Classroom Runtime Engine Endpoint
 app.post('/api/classroom/session', async (req, res) => {
   console.log(`🏫 [API REQ] /api/classroom/session - Action: ${req.body?.action}`);
   try {
@@ -292,7 +289,7 @@ app.post('/api/classroom/session', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// SERVER BINDING & EXPORT FOR VERCEL
+// SERVER BINDING & VERCEL HANDLER EXPORT
 // -------------------------------------------------------------
 const PORT = process.env.PORT || 5000;
 
@@ -302,4 +299,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   });
 }
 
-export default app;
+// Menangani permintaan HTTP & WebSockets di Vercel Serverless
+export default function handler(req: any, res: any) {
+  server.emit('request', req, res);
+}

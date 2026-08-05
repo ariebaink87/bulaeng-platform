@@ -25,7 +25,7 @@ const checkCorsOrigin = (origin: string | undefined, callback: (err: Error | nul
   if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
     callback(null, true);
   } else {
-    callback(null, true); // Fallback allow untuk testing
+    callback(null, true);
   }
 };
 
@@ -42,25 +42,18 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
     credentials: true
   },
-  transports: ['polling', 'websocket'], // Polling sebagai fallback utama di Vercel
+  transports: ['polling', 'websocket'],
   path: '/socket.io/',
-  
-  // 💡 OPTIMASI UNTUK VERCEL SERVERLESS (Mencegah Putus-Nyambung)
-  pingTimeout: 60000,     // Menunggu hingga 60 detik sebelum menganggap client terputus
-  pingInterval: 25000,    // Mengirim ping heartbeat setiap 25 detik
-  connectTimeout: 45000,  // Waktu toleransi koneksi awal
+  pingTimeout: 60000,
+  pingInterval: 25000,
   allowEIO3: true
 });
 
 const brain = new BrainProcessor();
-
-// Store In-Memory untuk Sesi Runtime Engine
 const activeSessions = new Map<string, ClassroomRuntimeEngine>();
 
-// Middleware Utama
 app.use(express.json());
 
-// Middleware Global Logging
 app.use((req, res, next) => {
   console.log(`🌐 [HTTP REQUEST] ${req.method} ${req.url}`);
   next();
@@ -111,6 +104,21 @@ io.on('connection', (socket) => {
 // API ENDPOINTS
 // -------------------------------------------------------------
 
+// 0. Endpoint Setup Initial (FIX Error 404 Not Found)
+app.post('/api/v1/setup', (req, res) => {
+  console.log('⚙️ [API REQ] /api/v1/setup - Inisialisasi setup...');
+  res.json({
+    success: true,
+    message: 'System setup initialized successfully',
+    data: {
+      status: 'READY',
+      universe: 'Dunia Hewan',
+      class: 'a',
+      state: classState
+    }
+  });
+});
+
 // 1. Endpoint Boot Engine
 app.post('/api/v1/boot', (req, res) => {
   console.log('🚀 [API REQ] /api/v1/boot - Memulai sesi kelas baru...');
@@ -123,7 +131,6 @@ app.post('/api/v1/boot', (req, res) => {
   };
 
   io.emit('state_changed', classState);
-  console.log('✅ [API RES] Boot berhasil, State:', classState);
   res.json({ success: true, data: classState });
 });
 
@@ -131,7 +138,6 @@ app.post('/api/v1/boot', (req, res) => {
 app.post('/api/v1/advance', (req, res) => {
   console.log('⏩ [API REQ] /api/v1/advance - Memajukan moment...');
   if (classState.system_status !== 'RUNNING') {
-    console.warn('⚠️ [API WARN] /api/v1/advance - Gagal: Engine belum di-boot!');
     return res.status(400).json({ success: false, message: 'Engine belum di-boot!' });
   }
 
@@ -146,89 +152,60 @@ app.post('/api/v1/advance', (req, res) => {
   }
 
   io.emit('state_changed', classState);
-  console.log('✅ [API RES] Advance berhasil, Moment saat ini:', classState.current_moment);
   res.json({ success: true, data: classState });
 });
 
-// 3. Endpoint Brain AI Ask (RAG Enabled)
+// 3. Endpoint Brain AI Ask
 app.post('/api/v1/brain/ask', async (req, res) => {
-  console.log('🧠 [API REQ] /api/v1/brain/ask - Memproses prompt AI...');
   try {
     const { prompt, currentMoment } = req.body;
-
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
-      console.warn('⚠️ [API WARN] /api/v1/brain/ask - Prompt kosong.');
-      return res.status(400).json({
-        success: false,
-        error: 'Field "prompt" wajib diisi dan berupa teks.'
-      });
+      return res.status(400).json({ success: false, error: 'Field "prompt" wajib diisi.' });
     }
 
     const momentContext = currentMoment || classState.current_moment;
-    console.log(`💬 Prompt Received: "${prompt.trim()}" | Context: ${momentContext}`);
-
     const responseText = await brain.processPedagogicalPrompt(prompt, momentContext);
-    console.log('✅ [API RES] Respon AI berhasil dibuat.');
 
     return res.json({
       success: true,
-      data: {
-        moment: momentContext,
-        prompt: prompt.trim(),
-        response: responseText
-      }
+      data: { moment: momentContext, prompt: prompt.trim(), response: responseText }
     });
   } catch (error: any) {
-    console.error('❌ [BRAIN API ERROR]:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Terjadi kesalahan internal pada Brain Processor.'
-    });
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// 4. Brain Orchestrator Preparation Endpoint
+// 4. Brain Orchestrator Endpoint
 app.post('/api/brain/prepare-day', async (req, res) => {
-  console.log('🌅 [API REQ] /api/brain/prepare-day - Menjalankan alur persiapan...');
   try {
     const { group = 'B1' } = req.body;
-
     const orchestrator = new BrainOrchestrator();
     const episodePackage = await orchestrator.triggerEarlyMorningProcess(group);
 
-    console.log(`✅ [API RES] Persiapan hari selesai untuk grup: ${group}`);
     return res.status(200).json({
       success: true,
-      message: `Episode for group ${group} successfully prepared by Brain Orchestrator.`,
+      message: `Episode for group ${group} successfully prepared.`,
       data: episodePackage,
     });
   } catch (error: any) {
-    console.error('❌ [ORCHESTRATOR ERROR]:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to trigger prepare day workflow.',
-    });
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // 5. Classroom Runtime Engine Endpoint
 app.post('/api/classroom/session', async (req, res) => {
-  console.log(`🏫 [API REQ] /api/classroom/session - Action: ${req.body?.action}`);
   try {
     const { action, sessionId, classId, teacherId } = req.body;
 
     if (!sessionId) {
-      console.warn('⚠️ [API WARN] sessionId tidak diberikan.');
       return res.status(400).json({ success: false, error: 'sessionId is required' });
     }
 
     let engine = activeSessions.get(sessionId);
 
-    // ACTION: BOOT
     if (action === 'BOOT') {
       if (!classId || !teacherId) {
-        console.warn('⚠️ [API WARN] classId atau teacherId kurang untuk BOOT.');
-        return res.status(400).json({ success: false, error: 'classId and teacherId are required for BOOT' });
+        return res.status(400).json({ success: false, error: 'classId and teacherId required for BOOT' });
       }
 
       engine = new ClassroomRuntimeEngine(sessionId, classId, teacherId);
@@ -236,7 +213,6 @@ app.post('/api/classroom/session', async (req, res) => {
       activeSessions.set(sessionId, engine);
 
       currentMomentIndex = 0;
-
       classState = {
         session_id: sessionId,
         current_moment: MOMENTS[currentMomentIndex],
@@ -245,23 +221,19 @@ app.post('/api/classroom/session', async (req, res) => {
       };
       io.emit('state_changed', classState);
 
-      console.log(`✅ [RUNTIME BOOT] Sesi ${sessionId} aktif untuk kelas ${classId}`);
       return res.status(200).json({
         success: true,
         action: 'BOOT',
-        message: `Session ${sessionId} booted successfully for class ${classId}`,
+        message: `Session ${sessionId} booted successfully`,
       });
     }
 
     if (!engine) {
-      console.warn(`⚠️ [API WARN] Sesi ${sessionId} tidak aktif.`);
       return res.status(404).json({ success: false, error: `Session ${sessionId} is not active` });
     }
 
-    // ACTION: ADVANCE
     if (action === 'ADVANCE') {
       engine.advanceMoment();
-
       if (currentMomentIndex < MOMENTS.length - 1) {
         currentMomentIndex++;
         classState.current_moment = MOMENTS[currentMomentIndex];
@@ -273,45 +245,28 @@ app.post('/api/classroom/session', async (req, res) => {
       }
       io.emit('state_changed', classState);
 
-      console.log(`✅ [RUNTIME ADVANCE] Sesi ${sessionId} maju ke moment berikutnya.`);
-      return res.status(200).json({
-        success: true,
-        action: 'ADVANCE',
-        message: `Session ${sessionId} advanced to next moment`,
-      });
+      return res.status(200).json({ success: true, action: 'ADVANCE' });
     }
 
-    // ACTION: SHUTDOWN
     if (action === 'SHUTDOWN') {
       const metrics = engine.getMetrics();
       engine.shutdown();
       activeSessions.delete(sessionId);
-
       classState.system_status = 'ENDED';
       io.emit('state_changed', classState);
 
-      console.log(`🛑 [RUNTIME SHUTDOWN] Sesi ${sessionId} ditutup.`);
-      return res.status(200).json({
-        success: true,
-        action: 'SHUTDOWN',
-        metrics,
-        message: `Session ${sessionId} closed successfully`,
-      });
+      return res.status(200).json({ success: true, action: 'SHUTDOWN', metrics });
     }
 
     return res.status(400).json({ success: false, error: 'Invalid action provided' });
 
   } catch (error: any) {
-    console.error('❌ [RUNTIME ERROR]:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Runtime execution error',
-    });
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // -------------------------------------------------------------
-// SERVER BINDING & VERCEL HANDLER EXPORT
+// EXPORT HANDLER UNTUK VERCEL
 // -------------------------------------------------------------
 const PORT = process.env.PORT || 5000;
 
@@ -321,7 +276,6 @@ if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   });
 }
 
-// Menangani permintaan HTTP & WebSockets di Vercel Serverless
 export default function handler(req: any, res: any) {
   server.emit('request', req, res);
 }

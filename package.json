@@ -25,6 +25,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^20.19.43",
+    "@types/react": "^19.2.18",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.5",
     "typescript": "^5.9.3"
